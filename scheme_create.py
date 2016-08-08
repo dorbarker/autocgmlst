@@ -9,14 +9,15 @@ import pandas as pd
 import subprocess
 import tempfile
 import update_definitions
+import json
 
-def create(genome_dir, alleles_dir, json_dir, work_dir, prokka_out, min_identity, min_coverage, cores):
+def create(genome_dir, alleles_dir, json_dir, work_dir, prokka_out, min_identity, min_coverage, mist_bin, cores):
  
     call_table = os.path.join(work_dir, 'wgmlst_calls.csv')
 
     #annotate(genome_dir, prokka_out, cores)
 
-    representatives = resolve_homologues(prokka_out, min_identity, min_coverage, cores)
+    representatives = resolve_homologues(prokka_out, work_dir, min_identity, min_coverage, cores)
 
     create_markers(representatives, alleles_dir, work_dir)
 
@@ -46,7 +47,7 @@ def annotate(fasta_dir, output_dir, cores):
         ppe.map(partial(prokka, outdir=output_dir),
                 contents(fasta_dir, '.fasta'))
 
-def resolve_homologues(prokka_outdir, min_identity, min_coverage, cores):
+def resolve_homologues(prokka_outdir, work_dir, min_identity, min_coverage, cores):
 
     genes = {}
 
@@ -58,6 +59,10 @@ def resolve_homologues(prokka_outdir, min_identity, min_coverage, cores):
     homologue_groups = match_genes(genes, min_identity, min_coverage, cores)
 
     representatives = {g: genes[g] for g in homologue_groups}
+
+    with open(os.path.join(work_dir, 'homologues.json'), 'w') as h:
+        json.dump(homologue_groups, h, sort_keys=True)
+
     return representatives
 
 def create_markers(reps, alleles_dir, work_dir):
@@ -84,7 +89,7 @@ def create_markers(reps, alleles_dir, work_dir):
         with open(path, 'w') as f:
             f.write(fasta)
 
-    with open(os.path.join(work_dir, 'wgmlst.markers')) as t:
+    with open(os.path.join(work_dir, 'wgmlst.markers'), 'w') as t:
         t.write('\n'.join(markers))
 
 def perform_wgmlst(mist_bin, test_path, alleles_dir,

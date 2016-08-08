@@ -31,6 +31,8 @@ def arguments():
     create.add_argument('--cores', type=int, default=cpu_count(),
                         help='Number of CPU cores to use')
     
+    create.add_argument('--mist', help='Path to MIST.exe')
+
     create.set_defaults(func=scheme_create.create)
     
     ### Analyze
@@ -49,6 +51,7 @@ def prepare_create_args(args):
              'prokka_out': subdir('prokka_out'),
              'min_identity': args.identity,
              'min_coverage': args.coverage,
+             'mist_bin': args.mist,
              'cores': args.cores}
     
     for i in ('work_dir', 'genome_dir', 'alleles_dir', 'json_dir', 'prokka_out'):

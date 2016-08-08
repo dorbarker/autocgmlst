@@ -75,7 +75,7 @@ def match_genes(gene_dict, min_identity, min_coverage, cores):
     
     def to_search(g2, g1, lengths, to_skip):
 
-        return  g2 not in to_skip and lengths[g2] / lengths[g1] >= min_coverage
+        return  g2 not in to_skip and 1.0 >= (lengths[g2] / lengths[g1]) >= min_coverage
 
     from time import time
 
