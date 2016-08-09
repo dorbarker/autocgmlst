@@ -58,8 +58,9 @@ def resolve_homologues(prokka_outdir, work_dir, min_identity, min_coverage, core
 
     for ffn in contents(prokka_outdir, '/*.ffn'):
         with open(ffn) as f:
-            cur = dict(load_gene(g) for g in SeqIO.parse(f, 'fasta'))
-            genes.update(cur)
+            cur = (load_gene(g) for g in SeqIO.parse(f, 'fasta'))
+            to_update = dict(u for u in cur if u[1] not in genes.values())
+            genes.update(to_update)
 
     if os.access(homologue_path, os.F_OK):
         with open(homologue_path, 'r') as h:

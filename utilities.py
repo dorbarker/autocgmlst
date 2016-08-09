@@ -121,26 +121,28 @@ def match_genes(gene_dict, min_identity, min_coverage, cores):
     from time import time
 
     to_skip = set()
+    homologues = collections.defaultdict(set)
 
     lengths = {k: len(v) for k, v in gene_dict.items()}
     genes = sorted(gene_dict, key=lambda x: lengths[x], reverse=True)
 
     segments = [genes[i:i + cores] for i in range(0, len(genes), cores)]
     start = time()
-    with ProcessPoolExecutor(cores) as ppe:
-        f = partial(collapse_segment, gene_dict=gene_dict, lengths=lengths,
-                    min_identity=min_identity, min_coverage=min_coverage)
 
-        segment_results = ppe.map(f, segments)
+    for pos in range(cores):
 
-    homologues = rectify_results(segment_results)
+        with ProcessPoolExecutor(cores) as ppe:
+            f = partial(collapse_segment, position=pos, to_skip=to_skip,  gene_dict=gene_dict, lengths=lengths,
+                        min_identity=min_identity, min_coverage=min_coverage)
+
+            segment_results = ppe.map(f, segments)
+
+            homologues, to_skip = rectify_results(segment_results, homologues, to_skip)
 
     print("Homologue collapsing runtime:", time() - start)
     return homologues
 
-def rectify_results(segment_results):
-
-    homologues = collections.defaultdict(set)
+def rectify_results(segment_results, homologues, to_skip):
 
     to_del = set()
 
@@ -157,33 +159,38 @@ def rectify_results(segment_results):
                 to_del.add(homologue)
 
         homologues[key] |= to_add
+        to_skip |= homologues[key]
 
-    return {k: v for k, v in homologues.items() if k not in to_del}
+    return {k: v for k, v in homologues.items() if k not in to_del}, to_skip
 
-def collapse_segment(segment, gene_dict, lengths, min_identity, min_coverage):
+def collapse_segment(segment, position, to_skip, gene_dict, lengths, min_identity, min_coverage):
 
-    to_skip = set()
     homologues = collections.defaultdict(set)
 
-    for gene in segment:
-        if gene in to_skip:
-            continue
+    pos = position
+    gene = segment[pos]
 
-        filter_func = partial(to_search, g1=gene, lengths=lengths,
-                              to_skip=to_skip, min_identity=min_identity, min_coverage=min_coverage)
+    while gene in to_skip:
+        try:
+            pos += 1
+            gene = segment[pos]
+        except IndexError:
+            return None
 
-        searches = list(filter(filter_func, gene_dict))
+    filter_func = partial(to_search, g1=gene, lengths=lengths,
+                          to_skip=to_skip, min_identity=min_identity, min_coverage=min_coverage)
 
-        fasta = fasta_formatter(gene_dict, *searches)
+    searches = list(filter(filter_func, gene_dict))
 
-        clusters = cluster_collapse(fasta, lengths, min_identity, min_coverage)
+    fasta = fasta_formatter(gene_dict, *searches)
 
-        for cluster in clusters:
-            to_skip |= clusters[cluster]
-            homologues[cluster] |= clusters[cluster]
+    clusters = cluster_collapse(fasta, lengths, min_identity, min_coverage)
 
-            for h in clusters[cluster]:
-                homologues[cluster] |= homologues[h]
-                del homologues[h]
+    for cluster in clusters:
+        homologues[cluster] |= clusters[cluster]
+
+        for h in clusters[cluster]:
+            homologues[cluster] |= homologues[h]
+            del homologues[h]
 
     return homologues
