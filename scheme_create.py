@@ -12,22 +12,25 @@ import update_definitions
 import json
 
 def create(genome_dir, alleles_dir, json_dir, work_dir, prokka_out, min_identity, min_coverage, mist_bin, cores):
- 
-    call_table = os.path.join(work_dir, 'wgmlst_calls.csv')
 
+    call_table = os.path.join(work_dir, 'wgmlst_calls.csv')
+    wgmlst_markers = os.path.join(work_dir, 'wgmlst.markers')
     #annotate(genome_dir, prokka_out, cores)
 
     representatives = resolve_homologues(prokka_out, work_dir, min_identity, min_coverage, cores)
 
     create_markers(representatives, alleles_dir, work_dir)
 
-    perform_wgmlst(mist_bin, test_path, alleles_dir, genome_dir, json_dir, cores)
+    perform_wgmlst(mist_bin, wgmlst_markers, alleles_dir, genome_dir, json_dir, cores)
 
     update_definitions.update_definitions(alleles_dir, json_dir, 'wgmlst')
 
-    json2csv.convert_to_table(json_dir, call_table, work_dir)
+    json2csv.convert_to_table(json_dir, 'wgmlst', call_table)
 
-    divide_schemes(call_table, threshold, remove_worst_genomes)
+    # makes parameters for threshold and remove_worst_genomes later
+    cgmlst, accessory = divide_schemes(call_table, 0, 0)
+
+    export_schemes(work_dir, cgmlst, accessory)
 
 def prokka(fasta, outdir):
 
@@ -42,7 +45,7 @@ def prokka(fasta, outdir):
     subprocess.call(prokka)
 
 def annotate(fasta_dir, output_dir, cores):
-    
+
     with ProcessPoolExecutor(cores) as ppe:
         ppe.map(partial(prokka, outdir=output_dir),
                 contents(fasta_dir, '.fasta'))
@@ -50,18 +53,25 @@ def annotate(fasta_dir, output_dir, cores):
 def resolve_homologues(prokka_outdir, work_dir, min_identity, min_coverage, cores):
 
     genes = {}
+    homologue_path = os.path.join(work_dir, 'homologues.json')
+
 
     for ffn in contents(prokka_outdir, '/*.ffn'):
         with open(ffn) as f:
             cur = dict(load_gene(g) for g in SeqIO.parse(f, 'fasta'))
             genes.update(cur)
 
-    homologue_groups = match_genes(genes, min_identity, min_coverage, cores)
+    if os.access(homologue_path, os.F_OK):
+        with open(homologue_path, 'r') as h:
+            homologue_groups =  json.load(h)
+    else:
+        homologue_groups = match_genes(genes, min_identity, min_coverage, cores)
 
     representatives = {g: genes[g] for g in homologue_groups}
 
-    with open(os.path.join(work_dir, 'homologues.json'), 'w') as h:
-        json.dump(homologue_groups, h, sort_keys=True)
+    with open(homologue_path, 'w') as h:
+        jsonable = {k: list(v) for k, v in homologue_groups.items()}
+        json.dump(jsonable, h, indent=4, sort_keys=True)
 
     return representatives
 
@@ -92,38 +102,43 @@ def create_markers(reps, alleles_dir, work_dir):
     with open(os.path.join(work_dir, 'wgmlst.markers'), 'w') as t:
         t.write('\n'.join(markers))
 
+def run_mist(genome, mist_bin, test_path, alleles_dir, json_dir):
+
+    with tempfile.TemporaryDirectory() as d:
+        cmd = (mist_bin, '-T', d, '-t', test_path, '-a', alleles_dir,
+               '-b', '-j', os.path.join(json_dir, basename(genome)), genome)
+
+        subprocess.call(cmd)
+
 def perform_wgmlst(mist_bin, test_path, alleles_dir,
                    genome_dir, json_dir, cores):
 
-    def run_mist(genome):
+        f = partial(run_mist, mist_bin=mist_bin, test_path=test_path,
+                    alleles_dir=alleles_dir, json_dir=json_dir)
 
-        with tempfile.TemporaryDirectory() as d:
-            cmd = (mist_bin, '-T', d, '-t', test_path, '-a', alleles_dir,
-                   '-b', '-j', os.path.join(json_dir, basename(genome)), genome)
+        genomes = (os.path.join(genome_dir, g) for g in os.listdir(genome_dir))
 
-            subprocess.call(cmd)
-
-    with ProcessPoolExecutor(cores) as p:
-        p.map(run_mist, (os.path.join(genome_dir, g) for g in os.listdir(genome_dir)))
+        with ProcessPoolExecutor(cores) as p:
+            p.map(f, genomes)
 
 def divide_schemes(results_table, threshold, remove_worst_genomes):
 
     def count_bad(array):
 
-        return sum(1 for x in array if x in (-1, 0, '?'))
+        return sum(1 for x in array if x in ('-1', '0', '?'))
 
     calls = pd.read_csv(results_table, header=0, index_col=0)
 
-    genome_badness =  calls.apply(count_bad, axis=0)
+    genome_badness =  calls.apply(count_bad, axis=1)
     remove_thresh = percentile(genome_badness,  remove_worst_genomes)
 
     to_keep = [genome >= remove_thresh for genome in genome_badness]
 
     calls = calls[to_keep]
 
-    gene_badness = calls.apply(count_bad, axis=1)
+    gene_badness = calls.apply(count_bad, axis=0)
 
-    cgmlst = [x / len(calls) < threshold for x in gene_badness]
+    cgmlst = [x / len(calls) <= threshold for x in gene_badness]
     accessory = [not y for y in cgmlst]
 
     cgmlst_calls = calls[calls.columns[cgmlst]]
@@ -131,11 +146,11 @@ def divide_schemes(results_table, threshold, remove_worst_genomes):
 
     return cgmlst_calls, acc_calls
 
-def export_schemes(outdir, work_dir, cgmlst, accessory):
+def export_schemes(work_dir, cgmlst, accessory):
 
     # Set up call table paths
-    cg_calls = os.path.join(outdir, 'cgmlst_calls.csv')
-    acc_calls = os.path.join(outdir, 'accessory_calls.csv')
+    cg_calls = os.path.join(work_dir, 'cgmlst_calls.csv')
+    acc_calls = os.path.join(work_dir, 'accessory_calls.csv')
 
     # Set up .markers file paths
     wgmlst_markers = os.path.join(work_dir, 'wgmlst.markers')

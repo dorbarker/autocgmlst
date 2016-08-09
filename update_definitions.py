@@ -114,13 +114,13 @@ def update(json_dir, known_alleles, test):
 
     return known_alleles
 
-def update_definitions(alleles, json_dir, test):
+def update_definitions(alleles, jsons, test):
 
-    known_alleles = get_known_alleles(args.alleles)
+    known_alleles = get_known_alleles(alleles)
 
-    known_alleles = update(args.jsons, known_alleles, args.test)
+    known_alleles = update(jsons, known_alleles, test)
 
-    update_alleles(known_alleles, args.alleles)
+    update_alleles(known_alleles, alleles)
 
 def main():
 

@@ -92,7 +92,7 @@ def load_calls(json_path, test):
 
 def convert_to_table(json_path, test, out):
 
-    load_calls(json_path, test)
+    results = load_calls(json_path, test)
 
     write_csv(results, out)
 

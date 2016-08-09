@@ -1,11 +1,13 @@
 from Bio import SeqIO
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import collections
 import glob
 import operator
 import os
 import subprocess
+import tempfile
+import re
 
 Gene = collections.namedtuple('Gene', ['id', 'seq'])
 
@@ -52,67 +54,136 @@ def load_gene(record):
     return record.id, str(record.seq)
 
 def fix_headers(infile, outfile):
-    
+
     def fix_header(i, record):
         o = record
         o.id = str(i)
         return o
-    
+
     with open(infile, 'r') as i, open(outfile, 'w') as o:
         records = (fix_header(a, b) for a, b in enumerate(SeqIO.parse(i, 'fasta'), 1))
-        
+
         SeqIO.write(records, o, 'fasta')
 
-def match_gene(g2, g1, min_identity, min_coverage, gene_dict):
+def fasta_formatter(gene_dict, *names):
 
-    ident, cov = calculate_distance(gene_dict[g1],
-                                    gene_dict[g2])
+    seqs = ('>{}\n{}'.format(name, gene_dict[name]) for name in names)
 
-    if ident > min_identity and cov > min_coverage:
-        return g2
+    return '\n'.join(seqs)
+
+def parse_cdhit_clusters(path, lengths):
+
+    pt = re.compile('>.*\.\.\.')
+
+    matching_clusters = collections.defaultdict(list)
+
+    with open(path, 'r') as f:
+        data = f.read().split('>Cluster')
+
+    clusters = ((x.strip('>.') for x in re.findall(pt, y)) for y in data if y)
+
+    size_sorted_clusters = (sorted(c, key=lambda n: -lengths[n]) for c in clusters)
+
+    return {z[0]: set(z[1:]) for z in size_sorted_clusters}
+
+
+def cluster_collapse(fasta, lengths, min_identity, min_coverage):
+
+    with tempfile.TemporaryDirectory() as d:
+
+        fasta_path = os.path.join(d, 'clusters.fasta')
+        out_path = os.path.join(d, 'clusters.out')
+
+        with open(fasta_path, 'w') as f:
+            f.write(fasta)
+
+        try:
+            cdhit = 'cd-hit'
+
+            subprocess.check_call(('which', cdhit), stdout=subprocess.DEVNULL)
+
+        except CalledProcessError:
+
+            cdhit = 'cdhit'
+
+        cmd = (cdhit, '-i', fasta_path, '-o', out_path, '-c', str(min_identity),
+               '-s', str(min_coverage), '-T', '1', '-M', '0', '-d', '0')
+
+        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        return parse_cdhit_clusters(out_path + '.clstr', lengths)
+
+def to_search(g2, g1, lengths, to_skip, min_identity, min_coverage):
+
+    return  g2 not in to_skip and 1.0 >= (lengths[g2] / lengths[g1]) >= min_coverage
 
 def match_genes(gene_dict, min_identity, min_coverage, cores):
-    
-    def to_search(g2, g1, lengths, to_skip):
-
-        return  g2 not in to_skip and 1.0 >= (lengths[g2] / lengths[g1]) >= min_coverage
-
     from time import time
 
-    homologues = collections.defaultdict(list)
+    to_skip = set()
 
     lengths = {k: len(v) for k, v in gene_dict.items()}
-    print(len(lengths))
+    genes = sorted(gene_dict, key=lambda x: lengths[x], reverse=True)
+
+    segments = [genes[i:i + cores] for i in range(0, len(genes), cores)]
+    start = time()
+    with ProcessPoolExecutor(cores) as ppe:
+        f = partial(collapse_segment, gene_dict=gene_dict, lengths=lengths,
+                    min_identity=min_identity, min_coverage=min_coverage)
+
+        segment_results = ppe.map(f, segments)
+
+    homologues = rectify_results(segment_results)
+
+    print("Homologue collapsing runtime:", time() - start)
+    return homologues
+
+def rectify_results(segment_results):
+
+    homologues = collections.defaultdict(set)
+
+    to_del = set()
+
+    for h in segment_results:
+        for k in h:
+            homologues[k] |= h[k]
+
+
+    for key in homologues:
+        to_add = set()
+        for homologue in homologues[key]:
+            if homologue in homologues:
+                to_add |= homologues[homologue]
+                to_del.add(homologue)
+
+        homologues[key] |= to_add
+
+    return {k: v for k, v in homologues.items() if k not in to_del}
+
+def collapse_segment(segment, gene_dict, lengths, min_identity, min_coverage):
+
     to_skip = set()
-    t1 = time()
-    starttime = t1
-    # run the shortest genes first to eliminate as many search possibilities as possible
-    # for the later, longer comparisons
-    counter = 0
-    
-    for gene1 in sorted(gene_dict, key=lambda x: lengths[x], reverse=True):
-        counter += 1
-        
-        if gene1 in to_skip:
+    homologues = collections.defaultdict(set)
+
+    for gene in segment:
+        if gene in to_skip:
             continue
 
-        with ThreadPoolExecutor(cores) as tpe:
+        filter_func = partial(to_search, g1=gene, lengths=lengths,
+                              to_skip=to_skip, min_identity=min_identity, min_coverage=min_coverage)
 
-            f = partial(match_gene, g1=gene1, min_identity=min_identity, min_coverage=min_coverage, gene_dict=gene_dict)
-            
-            filter_func = partial(to_search, g1=gene1, lengths=lengths, to_skip=to_skip | {gene1})
-            
-            l = filter(filter_func, gene_dict)
-            
-            results = tpe.map(f, l)
+        searches = list(filter(filter_func, gene_dict))
 
-            for r in filter(None, results):
-                homologues[gene1].append( [r] + homologues[r] )
-                del homologues[r]
-                to_skip.add(r)
+        fasta = fasta_formatter(gene_dict, *searches)
 
-        t2 = time()
-        
-        print(counter, len(homologues), len(to_skip), t2-t1, t2-starttime)
-        t1 = t2
+        clusters = cluster_collapse(fasta, lengths, min_identity, min_coverage)
+
+        for cluster in clusters:
+            to_skip |= clusters[cluster]
+            homologues[cluster] |= clusters[cluster]
+
+            for h in clusters[cluster]:
+                homologues[cluster] |= homologues[h]
+                del homologues[h]
+
     return homologues
