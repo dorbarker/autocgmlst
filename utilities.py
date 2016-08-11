@@ -1,5 +1,5 @@
 from Bio import SeqIO
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 import collections
 import glob
@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import re
 
+from time import time
 Gene = collections.namedtuple('Gene', ['id', 'seq'])
 
 def basename(path):
@@ -87,7 +88,7 @@ def parse_cdhit_clusters(path, lengths):
     return {z[0]: set(z[1:]) for z in size_sorted_clusters}
 
 
-def cluster_collapse(fasta, lengths, min_identity, min_coverage):
+def cluster_collapse(fasta, lengths, min_identity, min_coverage, cores=1):
 
     with tempfile.TemporaryDirectory() as d:
 
@@ -107,7 +108,7 @@ def cluster_collapse(fasta, lengths, min_identity, min_coverage):
             cdhit = 'cdhit'
 
         cmd = (cdhit, '-i', fasta_path, '-o', out_path, '-c', str(min_identity),
-               '-s', str(min_coverage), '-T', '1', '-M', '0', '-d', '0')
+               '-s', str(min_coverage), '-T', str(cores), '-M', '0', '-d', '0')
 
         subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -118,38 +119,63 @@ def to_search(g2, g1, lengths, to_skip, min_identity, min_coverage):
     return  g2 not in to_skip and 1.0 >= (lengths[g2] / lengths[g1]) >= min_coverage
 
 def match_genes(gene_dict, min_identity, min_coverage, cores):
-    from time import time
 
     to_skip = set()
-    homologues = collections.defaultdict(set)
 
     lengths = {k: len(v) for k, v in gene_dict.items()}
     genes = sorted(gene_dict, key=lambda x: lengths[x], reverse=True)
 
-    segments = [genes[i:i + cores] for i in range(0, len(genes), cores)]
-    start = time()
+    chunk_size = len(genes) // (cores ** 2)
+    segments = [genes[i:i + chunk_size] for i in range(0, len(genes), chunk_size)]
 
-    for pos in range(cores):
+    with ThreadPoolExecutor(cores) as tpe:
+        f = partial(collapse_segment, to_skip=to_skip, gene_dict=gene_dict, lengths=lengths,
+                    min_identity=min_identity, min_coverage=min_coverage)
 
-        with ProcessPoolExecutor(cores) as ppe:
-            f = partial(collapse_segment, position=pos, to_skip=to_skip,  gene_dict=gene_dict, lengths=lengths,
-                        min_identity=min_identity, min_coverage=min_coverage)
+        segment_results = list(filter(None, tpe.map(f, segments)))
 
-            segment_results = ppe.map(f, segments)
+    homologues, to_skip = rectify_results(segment_results, to_skip)
 
-            homologues, to_skip = rectify_results(segment_results, homologues, to_skip)
-
-    print("Homologue collapsing runtime:", time() - start)
     return homologues
 
-def rectify_results(segment_results, homologues, to_skip):
+def refine_homologues(homologues, gene_dict, refine_identity, refine_coverage, cores):
 
+    rep_gene_dict = {k: v for k, v in gene_dict.items() if k in homologues}
+    print(len(homologues), len(gene_dict))
+
+    lengths = {k: len(v) for k, v in rep_gene_dict.items()}
+    fasta = fasta_formatter(rep_gene_dict, *rep_gene_dict.keys())
+
+    refined = cluster_collapse(fasta, lengths, refine_identity, refine_coverage, cores)
+
+    for r in refined:
+
+        to_add = set()
+        refined[r] |= homologues[r]
+
+        for h in refined[r]:
+
+            try:
+                to_add |= homologues[h]
+            except KeyError:
+                pass
+
+        refined[r] |= to_add
+
+    return refined
+
+def rectify_results(segments, to_skip):
+
+    homologues = {}
     to_del = set()
 
-    for h in segment_results:
-        for k in h:
-            homologues[k] |= h[k]
+    for segment in segments:
+        for d in segment:
 
+            try:
+                homologues[d] |= segment[d]
+            except KeyError:
+                homologues[d] = segment[d]
 
     for key in homologues:
         to_add = set()
@@ -163,34 +189,30 @@ def rectify_results(segment_results, homologues, to_skip):
 
     return {k: v for k, v in homologues.items() if k not in to_del}, to_skip
 
-def collapse_segment(segment, position, to_skip, gene_dict, lengths, min_identity, min_coverage):
+def collapse_segment(segment, to_skip, gene_dict, lengths, min_identity, min_coverage):
 
+    start = time()
     homologues = collections.defaultdict(set)
+    for gene in segment:
 
-    pos = position
-    gene = segment[pos]
+        if gene in to_skip:
+            continue
 
-    while gene in to_skip:
-        try:
-            pos += 1
-            gene = segment[pos]
-        except IndexError:
-            return None
+        filter_func = partial(to_search, g1=gene, lengths=lengths,
+                              to_skip=to_skip, min_identity=min_identity, min_coverage=min_coverage)
 
-    filter_func = partial(to_search, g1=gene, lengths=lengths,
-                          to_skip=to_skip, min_identity=min_identity, min_coverage=min_coverage)
+        searches = list(filter(filter_func, gene_dict))
 
-    searches = list(filter(filter_func, gene_dict))
+        fasta = fasta_formatter(gene_dict, *searches)
 
-    fasta = fasta_formatter(gene_dict, *searches)
+        clusters = cluster_collapse(fasta, lengths, min_identity, min_coverage)
 
-    clusters = cluster_collapse(fasta, lengths, min_identity, min_coverage)
+        for cluster in clusters:
+            homologues[cluster] |= clusters[cluster]
+            to_skip |= clusters[cluster]
 
-    for cluster in clusters:
-        homologues[cluster] |= clusters[cluster]
-
-        for h in clusters[cluster]:
-            homologues[cluster] |= homologues[h]
-            del homologues[h]
+            for h in clusters[cluster]:
+                homologues[cluster] |= homologues[h]
+                del homologues[h]
 
     return homologues

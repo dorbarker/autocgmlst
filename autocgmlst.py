@@ -33,6 +33,12 @@ def arguments():
 
     create.add_argument('--mist', help='Path to MIST.exe')
 
+    create.add_argument('--refine-identity', type=float,
+                        help='Refine homologues with this identity threshold')
+
+    create.add_argument('--refine-coverage', type=float,
+                        help='Refine homologues with this coverage threshold')
+
     create.set_defaults(func=scheme_create.create)
 
     ### Analyze
@@ -51,6 +57,8 @@ def prepare_create_args(args):
              'prokka_out': subdir('prokka_out'),
              'min_identity': args.identity,
              'min_coverage': args.coverage,
+             'refine_identity': args.refine_identity or args.identity,
+             'refine_coverage': args.refine_coverage or args.coverage,
              'mist_bin': args.mist,
              'cores': args.cores}
 

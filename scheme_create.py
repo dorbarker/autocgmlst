@@ -2,7 +2,7 @@ from functools import partial
 from Bio import SeqIO
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from numpy import percentile
-from utilities import basename, contents, load_gene, match_genes
+from utilities import basename, contents, load_gene, match_genes, refine_homologues
 import json2csv
 import os
 import pandas as pd
@@ -10,14 +10,16 @@ import subprocess
 import tempfile
 import update_definitions
 import json
-
-def create(genome_dir, alleles_dir, json_dir, work_dir, prokka_out, min_identity, min_coverage, mist_bin, cores):
+from time import time
+def create(genome_dir, alleles_dir, json_dir, work_dir, prokka_out, min_identity, min_coverage,
+           refine_identity, refine_coverage, mist_bin, cores):
 
     call_table = os.path.join(work_dir, 'wgmlst_calls.csv')
     wgmlst_markers = os.path.join(work_dir, 'wgmlst.markers')
-    #annotate(genome_dir, prokka_out, cores)
+    annotate(genome_dir, prokka_out, cores)
 
-    representatives = resolve_homologues(prokka_out, work_dir, min_identity, min_coverage, cores)
+    representatives = resolve_homologues(prokka_out, work_dir, min_identity, min_coverage,
+                                         refine_identity, refine_coverage, cores)
 
     create_markers(representatives, alleles_dir, work_dir)
 
@@ -27,7 +29,7 @@ def create(genome_dir, alleles_dir, json_dir, work_dir, prokka_out, min_identity
 
     json2csv.convert_to_table(json_dir, 'wgmlst', call_table)
 
-    # makes parameters for threshold and remove_worst_genomes later
+    ## makes parameters for threshold and remove_worst_genomes later
     cgmlst, accessory = divide_schemes(call_table, 0, 0)
 
     export_schemes(work_dir, cgmlst, accessory)
@@ -50,7 +52,8 @@ def annotate(fasta_dir, output_dir, cores):
         ppe.map(partial(prokka, outdir=output_dir),
                 contents(fasta_dir, '.fasta'))
 
-def resolve_homologues(prokka_outdir, work_dir, min_identity, min_coverage, cores):
+def resolve_homologues(prokka_outdir, work_dir, min_identity, min_coverage,
+                       refine_identity, refine_coverage, cores):
 
     genes = {}
     homologue_path = os.path.join(work_dir, 'homologues.json')
@@ -64,14 +67,18 @@ def resolve_homologues(prokka_outdir, work_dir, min_identity, min_coverage, core
 
     if os.access(homologue_path, os.F_OK):
         with open(homologue_path, 'r') as h:
-            homologue_groups =  json.load(h)
+            refined = json.load(h)
     else:
-        homologue_groups = match_genes(genes, min_identity, min_coverage, cores)
-
-    representatives = {g: genes[g] for g in homologue_groups}
+        t1 = time()
+        homologues = match_genes(genes, min_identity, min_coverage, cores)
+        t2 = time()
+        print("First pass in:" ,t2-t1, 'seconds')
+        refined = refine_homologues(homologues, genes, refine_identity, refine_coverage, cores)
+        print('Resolved homologues in:', time() -t1, 'seconds')
+    representatives = {g: genes[g] for g in refined}
 
     with open(homologue_path, 'w') as h:
-        jsonable = {k: list(v) for k, v in homologue_groups.items()}
+        jsonable = {k: list(v) for k, v in refined.items()}
         json.dump(jsonable, h, indent=4, sort_keys=True)
 
     return representatives
