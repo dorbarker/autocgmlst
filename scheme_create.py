@@ -75,11 +75,12 @@ def resolve_homologues(prokka_outdir, work_dir, min_identity, min_coverage,
         print("First pass in:" ,t2-t1, 'seconds')
         refined = refine_homologues(homologues, genes, refine_identity, refine_coverage, cores)
         print('Resolved homologues in:', time() -t1, 'seconds')
-    representatives = {g: genes[g] for g in refined}
 
-    with open(homologue_path, 'w') as h:
-        jsonable = {k: list(v) for k, v in refined.items()}
-        json.dump(jsonable, h, indent=4, sort_keys=True)
+        with open(homologue_path, 'w') as h:
+            jsonable = {k: list(v) for k, v in refined.items()}
+            json.dump(jsonable, h, indent=4, sort_keys=True)
+
+    representatives = {g: genes[g] for g in refined}
 
     return representatives
 
@@ -116,7 +117,7 @@ def run_mist(genome, mist_bin, test_path, alleles_dir, json_dir):
         cmd = (mist_bin, '-T', d, '-t', test_path, '-a', alleles_dir,
                '-b', '-j', os.path.join(json_dir, basename(genome)), genome)
 
-        subprocess.call(cmd)
+        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def perform_wgmlst(mist_bin, test_path, alleles_dir,
                    genome_dir, json_dir, cores):
@@ -133,7 +134,7 @@ def divide_schemes(results_table, threshold, remove_worst_genomes):
 
     def count_bad(array):
 
-        return sum(1 for x in array if x in ('-1', '0', '?'))
+        return sum(1 for x in array if x in (-1, 0, '?'))
 
     calls = pd.read_csv(results_table, header=0, index_col=0)
 

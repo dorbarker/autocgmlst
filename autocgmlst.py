@@ -68,7 +68,7 @@ def prepare_create_args(args):
 
     for j in contents(args.genomes):
         o = os.path.join(fargs['genome_dir'], os.path.basename(j))
-        #fix_headers(j, o)
+        fix_headers(j, o)
 
     return fargs
 
