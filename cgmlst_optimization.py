@@ -12,3 +12,8 @@ def optimize_sequence():
 def optimize_sequences():
     pass
 
+def shorten_genes():
+    '''Remove any hanging ends;
+    trim to the shortest varient
+    '''
+    pass
