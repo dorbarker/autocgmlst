@@ -5,7 +5,7 @@ import pandas as pd
 import subprocess
 
 def shannon(sequence, base=2):
-   
+
     def p(i):
         return sequence.count(i) / len(sequence)
 
@@ -15,12 +15,12 @@ def shannon_by_call(gene_calls):
     '''Calculates Shannon Entropy for the relative abundances
     of allele calls for each locus
     '''
-    
+
     intact = gene_calls.apply(intact_alleles)
-    
+
     shannons = map(shannon, intact)
-    
-    return shannons 
+
+    return shannons
 
 def shannon_by_sequence():
     '''Calculates Shannon Entropy for a particular k-mer of an
@@ -45,9 +45,9 @@ def subset_genes(n, reps):
     pass
 
 def failure_cost(gene):
-    
-    present = intact_alleles(gene) 
-    
+
+    present = intact_alleles(gene)
+
     N = len(gene)
 
     missing_probability = (N - len(present)) / N)
