@@ -66,6 +66,8 @@ def contents(path, pattern=''):
 
 def generate_SNPified_genes(aln_dir, snp_dir):
 
+    gene_snps = {}
+
     for gene in contents(aln_dir, '.aln'):
 
         snp_path = os.path.join(snp_dir, basename(gene) + '.snp')
@@ -77,25 +79,38 @@ def generate_SNPified_genes(aln_dir, snp_dir):
         snps = filter_uninformative(alleles)
 
         with open(snp_path, 'a') as o:
-            for name, seq in enumerate(snps):
-                o.write('>{}\n{}\n'.format(name + 1, seq))
+            for name, seq in enumerate(snps, start=1):
+                o.write('>{}\n{}\n'.format(name, seq))
+
+        gene_snps[gene] = [''] + snps
+
+    return gene_snps
 
 def filter_uninformative(alleles):
 
     informative = (x for x in zip(*alleles) if len(set(x)) is not 1 and '-' not in x)
     return tuple(zip(*informative))
 
-def reconstitute_SNPome(informative_genes, core_calls):
+def reconstitute_SNPome(genome, gene_snps, core_calls, concatenomes):
 
     def calls():
 
         with open(core_calls, newline='', mode='r') as f:
 
             reader = csv.reader(f)
-            header = next(reader, delimiter=',')
+            _, *header = next(reader, delimiter=',')
 
             # 'genome': [calls]
-            return  {line[0]: line[1:] for line in reader}
+            return  header, {line[0]: line[1:] for line in reader}
 
-    def reconstitute_genome():
-        pass
+    def reconstitute_genome(header):
+
+        seq = ''
+
+        for gene, call in zip(header, core_calls[genome]):
+            seq += gene_snps[gene][0]
+
+        return seq
+
+
+
