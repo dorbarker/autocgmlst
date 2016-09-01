@@ -39,6 +39,9 @@ def arguments():
     create.add_argument('--refine-coverage', type=float,
                         help='Refine homologues with this coverage threshold')
 
+    create.add_argument('--genome-quality-cutoff', type=float,
+                        help='Maximum number of missing loci permitted in a genome')
+
     create.set_defaults(func=scheme_create.create)
 
     ### Analyze
@@ -60,6 +63,7 @@ def prepare_create_args(args):
              'refine_identity': args.refine_identity or args.identity,
              'refine_coverage': args.refine_coverage or args.coverage,
              'mist_bin': args.mist,
+             'genome_quality_cutoff': args.genome_quality_cutoff,
              'cores': args.cores}
 
     for i in ('work_dir', 'genome_dir', 'alleles_dir', 'json_dir', 'prokka_out'):

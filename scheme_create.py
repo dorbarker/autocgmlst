@@ -12,7 +12,7 @@ import update_definitions
 import json
 from time import time
 def create(genome_dir, alleles_dir, json_dir, work_dir, prokka_out, min_identity, min_coverage,
-           refine_identity, refine_coverage, mist_bin, cores):
+           refine_identity, refine_coverage, genome_quality_cutoff, mist_bin, cores):
 
     call_table = os.path.join(work_dir, 'wgmlst_calls.csv')
     wgmlst_markers = os.path.join(work_dir, 'wgmlst.markers')
@@ -30,7 +30,7 @@ def create(genome_dir, alleles_dir, json_dir, work_dir, prokka_out, min_identity
     json2csv.convert_to_table(json_dir, 'wgmlst', call_table)
 
     ## makes parameters for threshold and remove_worst_genomes later
-    cgmlst, accessory = divide_schemes(call_table, 0, 0)
+    cgmlst, accessory = divide_schemes(call_table, 0, genome_quality_cutoff)
 
     export_schemes(work_dir, cgmlst, accessory)
 
@@ -45,6 +45,10 @@ def prokka(fasta, outdir):
               fasta)
 
     subprocess.call(prokka)
+
+    # tidy up
+    for ext in ('.err', '.faa', '.fna', '.fsa', '.gbk', '.gff', '.log', '.sqn', '.tbl', '.txt'):
+        os.remove( os.path.join(outdir, name, name + ext) )
 
 def annotate(fasta_dir, output_dir, cores):
 
@@ -130,18 +134,17 @@ def perform_wgmlst(mist_bin, test_path, alleles_dir,
         with ProcessPoolExecutor(cores) as p:
             p.map(f, genomes)
 
-def divide_schemes(results_table, threshold, remove_worst_genomes):
+def divide_schemes(results_table, threshold, remove_thresh):
 
     def count_bad(array):
 
-        return sum(1 for x in array if x in (-1, 0, '?'))
+        return sum(1 for x in array if x is 0)
 
     calls = pd.read_csv(results_table, header=0, index_col=0)
 
     genome_badness =  calls.apply(count_bad, axis=1)
-    remove_thresh = percentile(genome_badness,  remove_worst_genomes)
 
-    to_keep = [genome >= remove_thresh for genome in genome_badness]
+    to_keep = [(genome / len(calls.columns)) >= remove_thresh for genome in genome_badness]
 
     calls = calls[to_keep]
 
