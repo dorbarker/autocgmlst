@@ -62,12 +62,15 @@ def resolve_homologues(prokka_outdir, work_dir, min_identity, min_coverage,
     genes = {}
     homologue_path = os.path.join(work_dir, 'homologues.json')
 
-
+    counter = 0
     for ffn in contents(prokka_outdir, '/*.ffn'):
         with open(ffn) as f:
+            s = set(genes.values())
             cur = (load_gene(g) for g in SeqIO.parse(f, 'fasta'))
-            to_update = dict(u for u in cur if u[1] not in genes.values())
+            to_update = dict(u for u in cur if u[1] not in s)
             genes.update(to_update)
+            counter += 1
+            print(counter, 'genomes added to dict')
 
     if os.access(homologue_path, os.F_OK):
         with open(homologue_path, 'r') as h:
