@@ -103,7 +103,7 @@ def cluster_collapse(fasta, lengths, min_identity, min_coverage, cores=1):
 
             subprocess.check_call(('which', cdhit), stdout=subprocess.DEVNULL)
 
-        except CalledProcessError:
+        except subprocess.CalledProcessError:
 
             cdhit = 'cdhit'
 

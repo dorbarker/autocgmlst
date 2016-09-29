@@ -11,6 +11,7 @@ import tempfile
 import update_definitions
 import json
 from time import time
+
 def create(genome_dir, alleles_dir, json_dir, work_dir, prokka_out, min_identity, min_coverage,
            refine_identity, refine_coverage, genome_quality_cutoff, mist_bin, cores):
 
@@ -61,16 +62,25 @@ def resolve_homologues(prokka_outdir, work_dir, min_identity, min_coverage,
 
     genes = {}
     homologue_path = os.path.join(work_dir, 'homologues.json')
+    genes_path = os.path.join(work_dir, 'genes.json')
 
-    counter = 0
-    for ffn in contents(prokka_outdir, '/*.ffn'):
-        with open(ffn) as f:
-            s = set(genes.values())
-            cur = (load_gene(g) for g in SeqIO.parse(f, 'fasta'))
-            to_update = dict(u for u in cur if u[1] not in s)
-            genes.update(to_update)
-            counter += 1
-            print(counter, 'genomes added to dict')
+    if os.access(genes_path, os.F_OK):
+        with open(genes_path, 'r') as g:
+            genes = json.load(g)
+    else:
+
+        counter = 0
+        for ffn in contents(prokka_outdir, '/*.ffn'):
+            with open(ffn) as f:
+                s = set(genes.values())
+                cur = (load_gene(g) for g in SeqIO.parse(f, 'fasta'))
+                to_update = dict(u for u in cur if u[1] not in s)
+                genes.update(to_update)
+                counter += 1
+                print(counter, 'genomes added to dict')
+
+        with open(genes_path, 'w') as g:
+            json.dump(genes, g, indent=4, sort_keys=True)
 
     if os.access(homologue_path, os.F_OK):
         with open(homologue_path, 'r') as h:
