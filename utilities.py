@@ -216,3 +216,29 @@ def collapse_segment(segment, to_skip, gene_dict, lengths, min_identity, min_cov
                 del homologues[h]
 
     return homologues
+
+class Sequence(collections.namedtuple('Sequence', 'fwd')):
+    __slots__ = ()
+
+    @property
+    def rev(self):
+
+        comp = {'A': 'T', 'T':'A', 'G':'C', 'C':'G'}
+
+        return ''.join(comp[x] for x in reversed(self.forward))
+
+    def __contains__(self, other):
+
+        try:
+            contained = other.fwd in self.fwd or other.rev in self.fwd
+
+        except AttributeError:
+            contained = other in self.fwd or other in self.rev
+
+        return contained
+
+    def __len__(self):
+        return len(self.fwd)
+
+    def __str__(self):
+        return self.fwd
