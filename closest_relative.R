@@ -5,17 +5,28 @@ library(getopt)
 get_options <- function() {
 
     spec <- matrix(c(
-        'input', 'i', 1, 'charcter', 'Input cgMLST calls'
+        'help',  'h', 0, 'logical',   'Print this help and exit',
+        'input', 'i', 1, 'character', 'Input cgMLST calls',
+        'cores', 'c', 2, 'integer',   'Number of cores to use [1]'
     ), byrow = T, ncol = 5)
 
     opt <- getopt(spec)
 
+    if (!is.null(opt$help)) {
+        cat(getopt(spec, usage = TRUE))
+        q(status = 1)
+    }
+
+    if (is.null(opt$cores)) {
+        opt$cores <- 1
+    }
     opt
 }
 
 get_dm <- function(calls) {
 
-    d <- dist.gene(calls, method = 'percentage')
+    f <- compiler::cmpfun(dist.gene)
+    d <- f(calls, method = 'percentage')
     m <- as.matrix(d)
 
     m
@@ -39,11 +50,12 @@ main <- function() {
     opt <- get_options()
 
     calls <- read.csv(opt$input, row.names = 1)
+
     dm <- get_dm(calls)
 
-    minima <- sapply(rownames(dm), nonself_min, dm = dm)
+    minima <- mclapply(rownames(dm), nonself_min, dm = dm, mc.cores = opt$cores)
 
-    mean(as.integer(minima))
+    mean(as.numeric(minima))
 }
 
 main()
