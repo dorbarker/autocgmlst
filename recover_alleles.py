@@ -72,10 +72,9 @@ def linkage(centre, calls):
 
 
     triplet = calls[[left, centre, right]]
-    #condition = triplet[centre] >= 1 & triplet[left] >= 1 & triplet[right] >= 1
+
     condition = [all(map(lambda x: x >= 1, t)) for t in triplet.values]
     clean = triplet[condition]
-    #flanks = clean[[left, right]]
 
     for l, c, r in clean.values:
 
@@ -158,8 +157,6 @@ def calculate_fragment_probabilities(fragment_abundances, novel_allele_probabili
         # calculate probabilities for represented alleles
         # subtract novel_allele_probability equally from each
         # set any zeros to novel_allele_probability
-
-
         pass
 
     else:
@@ -172,7 +169,6 @@ def calculate_flanking_probabilities(partial_matches, links):
 
     total = sum(possible_links.values())
     l = len(possible_links)
-
 
     return {k: v / total for k, v in possible_links.items()}
 
